@@ -11,47 +11,42 @@ def add_border(image, border_size):
     return image
 
 # Function to stack images
-def stack_images(images, direction, border_size):
-    images_with_border = [add_border(img, border_size) for img in images]
-
+def stack_images(images, direction):
     if direction == 'Horizontal':
-        total_width = sum(img.width for img in images_with_border)
-        max_height = max(img.height for img in images_with_border)
+        total_width = sum(img.width for img in images)
+        max_height = max(img.height for img in images)
         new_image = Image.new('RGB', (total_width, max_height))
 
         x_offset = 0
-        for img in images_with_border:
+        for img in images:
             new_image.paste(img, (x_offset, 0))
             x_offset += img.width
 
     elif direction == 'Vertical':
-        total_height = sum(img.height for img in images_with_border)
-        max_width = max(img.width for img in images_with_border)
+        total_height = sum(img.height for img in images)
+        max_width = max(img.width for img in images)
         new_image = Image.new('RGB', (max_width, total_height))
 
         y_offset = 0
-        for img in images_with_border:
+        for img in images:
             new_image.paste(img, (0, y_offset))
             y_offset += img.height
 
     elif direction == 'Both':
-        # Stack horizontally first
-        total_width = sum(img.width for img in images_with_border)
-        max_height = max(img.height for img in images_with_border)
+        # First stack images horizontally
+        total_width = sum(img.width for img in images)
+        max_height = max(img.height for img in images)
         horizontal_image = Image.new('RGB', (total_width, max_height))
 
         x_offset = 0
-        for img in images_with_border:
+        for img in images:
             horizontal_image.paste(img, (x_offset, 0))
             x_offset += img.width
 
-        # Then stack the resulting image vertically
-        total_height = 2 * horizontal_image.height
-        final_image = Image.new('RGB', (horizontal_image.width, total_height))
-        final_image.paste(horizontal_image, (0, 0))
-        final_image.paste(horizontal_image, (0, horizontal_image.height))
-
-        return final_image
+        # Then stack the resulting horizontal image vertically
+        new_image = Image.new('RGB', (horizontal_image.width, 2 * horizontal_image.height))
+        new_image.paste(horizontal_image, (0, 0))
+        new_image.paste(horizontal_image, (0, horizontal_image.height))
 
     return new_image
 
@@ -65,19 +60,16 @@ if uploaded_files:
     direction = st.selectbox("Select stacking direction", ["Horizontal", "Vertical", "Both"])
 
     if st.button("Process Images"):
-        processed_images = []
-        for uploaded_file in uploaded_files:
-            image = Image.open(uploaded_file)
-            processed_image = stack_images([image], direction, border_size)
-            processed_images.append((processed_image, uploaded_file.name))
-
-        # Save processed images to a zip file
+        images = [Image.open(file) for file in uploaded_files]
+        stacked_image = stack_images(images, direction)
+        final_image = add_border(stacked_image, border_size)
+        
+        # Save final image to a zip file
         zip_buffer = BytesIO()
         with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            for processed_image, filename in processed_images:
-                img_buffer = BytesIO()
-                processed_image.save(img_buffer, format="PNG")
-                zip_file.writestr(filename, img_buffer.getvalue())
+            img_buffer = BytesIO()
+            final_image.save(img_buffer, format="PNG")
+            zip_file.writestr("processed_image.png", img_buffer.getvalue())
 
         zip_buffer.seek(0)
-        st.download_button("Download Processed Images", zip_buffer, "processed_images.zip", "application/zip")
+        st.download_button("Download Processed Image", zip_buffer, "processed_image.zip", "application/zip")
