@@ -6,49 +6,42 @@ import os
 import tempfile
 import zipfile
 
-def stack_images(image, mode, border_size):
+def stack_images(images, mode):
+    stacked_image = np.concatenate(images, axis=0 if mode == "Vertical" else 1)
+    return stacked_image
+
+def add_border(image, border_size):
     if border_size > 0:
         image = cv2.copyMakeBorder(image, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT)
-    
-    if mode == 'Horizontal':
-        stacked_image = np.hstack([image, image])
-    elif mode == 'Vertical':
-        stacked_image = np.vstack([image, image])
-    elif mode == 'Both':
-        stacked_image = np.hstack([image, image])
-        stacked_image = np.vstack([stacked_image, stacked_image])
-    else:
-        stacked_image = image
-        
-    return stacked_image
+    return image
 
 st.title("Bulk Image Processor")
 
 uploaded_files = st.file_uploader("Upload Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
-mode = st.selectbox("Choose how to stack images", ["None", "Horizontal", "Vertical", "Both"])
+mode = st.selectbox("Choose how to stack images", ["Horizontal", "Vertical"])
 border_size = st.slider("Select border size", 0, 50, 0)
 
 if uploaded_files:
-    output_dir = tempfile.mkdtemp()
-    processed_files = []
+    images = []
     for uploaded_file in uploaded_files:
         image = np.array(Image.open(uploaded_file))
-        processed_image = stack_images(image, mode, border_size)
-        output_path = os.path.join(output_dir, uploaded_file.name)
-        cv2.imwrite(output_path, cv2.cvtColor(processed_image, cv2.COLOR_RGB2BGR))
-        processed_files.append((uploaded_file.name, output_path))
+        images.append(image)
     
-    st.success("Processing complete. Download your files below:")
+    stacked_image = stack_images(images, mode)
+    processed_image = add_border(stacked_image, border_size)
     
-    with tempfile.NamedTemporaryFile(delete=False) as tmp:
-        with zipfile.ZipFile(tmp, 'w') as z:
-            for filename, filepath in processed_files:
-                z.write(filepath, filename)
+    output_dir = tempfile.mkdtemp()
+    output_path = os.path.join(output_dir, "processed_image.png")
+    cv2.imwrite(output_path, cv2.cvtColor(processed_image, cv2.COLOR_RGB2BGR))
     
-    with open(tmp.name, 'rb') as f:
+    st.image(processed_image, caption="Processed Image", use_column_width=True)
+    
+    st.success("Processing complete. Download your file below:")
+    
+    with open(output_path, 'rb') as f:
         btn = st.download_button(
-            label='Download processed images as ZIP',
+            label='Download processed image',
             data=f,
-            file_name='processed_images.zip',
-            mime='application/zip'
+            file_name='processed_image.png',
+            mime='image/png'
         )
