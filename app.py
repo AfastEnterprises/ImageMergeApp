@@ -24,9 +24,13 @@ def process_images(images, stack_option, border_size):
     elif stack_option == "Vertical":
         combined_image = cv2.vconcat(processed_images)
     elif stack_option == "Both":
-        row1 = cv2.hconcat(processed_images[:2])
-        row2 = cv2.hconcat(processed_images[2:])
-        combined_image = cv2.vconcat([row1, row2])
+        if len(processed_images) == 4:
+            row1 = cv2.hconcat(processed_images[:2])
+            row2 = cv2.hconcat(processed_images[2:])
+            combined_image = cv2.vconcat([row1, row2])
+        else:
+            st.warning("Please upload exactly four images for the 'Both' stacking option.")
+            combined_image = None
 
     return combined_image
 
@@ -42,25 +46,26 @@ if st.button("Process and Download"):
         # Processing images
         processed_image = process_images(uploaded_files, stack_option, border_size)
 
-        # Save the processed image to a zip file
-        zip_buffer = io.BytesIO()
-        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-            for uploaded_file in uploaded_files:
-                image_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-                img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
-                if border_size > 0:
-                    img = cv2.copyMakeBorder(img, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+        if processed_image is not None:
+            # Save the processed image to a zip file
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+                for uploaded_file in uploaded_files:
+                    image_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
+                    img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
+                    if border_size > 0:
+                        img = cv2.copyMakeBorder(img, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
 
-                # Encode image as PNG
-                is_success, buffer = cv2.imencode(".png", img)
-                img_bytes = io.BytesIO(buffer)
+                    # Encode image as PNG
+                    is_success, buffer = cv2.imencode(".png", img)
+                    img_bytes = io.BytesIO(buffer)
 
-                # Write to zip with the original file name
-                zip_file.writestr(uploaded_file.name, img_bytes.getvalue())
+                    # Write to zip with the original file name
+                    zip_file.writestr(uploaded_file.name, img_bytes.getvalue())
 
-        zip_buffer.seek(0)
+            zip_buffer.seek(0)
 
-        st.download_button("Download ZIP", zip_buffer, "processed_images.zip", "application/zip")
+            st.download_button("Download ZIP", zip_buffer, "processed_images.zip", "application/zip")
 
     else:
         st.warning("Please upload at least one image.")
