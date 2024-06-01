@@ -4,6 +4,7 @@ import numpy as np
 from PIL import Image
 import os
 import tempfile
+import zipfile
 
 def stack_images(image, mode, border_size):
     if border_size > 0:
@@ -29,21 +30,25 @@ border_size = st.slider("Select border size", 0, 50, 0)
 
 if uploaded_files:
     output_dir = tempfile.mkdtemp()
+    processed_files = []
     for uploaded_file in uploaded_files:
         image = np.array(Image.open(uploaded_file))
         processed_image = stack_images(image, mode, border_size)
         output_path = os.path.join(output_dir, uploaded_file.name)
         cv2.imwrite(output_path, cv2.cvtColor(processed_image, cv2.COLOR_RGB2BGR))
-        st.image(processed_image, caption=uploaded_file.name, use_column_width=True)
+        processed_files.append((uploaded_file.name, output_path))
     
     st.success("Processing complete. Download your files below:")
     
-    for file_name in os.listdir(output_dir):
-        file_path = os.path.join(output_dir, file_name)
-        with open(file_path, "rb") as file:
-            btn = st.download_button(
-                label=f"Download {file_name}",
-                data=file,
-                file_name=file_name,
-                mime="image/png"
-            )
+    with tempfile.NamedTemporaryFile(delete=False) as tmp:
+        with zipfile.ZipFile(tmp, 'w') as z:
+            for filename, filepath in processed_files:
+                z.write(filepath, filename)
+    
+    with open(tmp.name, 'rb') as f:
+        btn = st.download_button(
+            label='Download processed images as ZIP',
+            data=f,
+            file_name='processed_images.zip',
+            mime='application/zip'
+        )
