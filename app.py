@@ -19,7 +19,7 @@ def stack_images(image, mode, padding):
     
     stacked_image_with_padding = cv2.copyMakeBorder(stacked_image, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=(255, 255, 255))
         
-    return stacked_image_with_padding
+    return stacked_image
 
 st.title("Bulk Image Processor")
 
