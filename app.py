@@ -3,6 +3,8 @@ from PIL import Image, ImageOps
 import io
 import zipfile
 import os
+import cv2
+import numpy as np
 
 def process_images(images, stack_option, resize_option, border_size):
     processed_images = []
@@ -58,7 +60,7 @@ border_size = st.slider("Border Size", 0, 50, 0)
 
 if st.button("Process and Download"):
     if uploaded_files:
-        images = [Image.open(image) for image in uploaded_files]
+        images = [cv2.imdecode(np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8), 1) for uploaded_file in uploaded_files]
         processed_image = process_images(images, stack_option, resize_option, border_size)
 
         # Save the processed images to a zip file
