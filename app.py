@@ -1,6 +1,5 @@
 import streamlit as st
 from PIL import Image, ImageOps
-import os
 import zipfile
 from io import BytesIO
 
@@ -11,7 +10,7 @@ def add_border(image, border_size):
     return image
 
 # Function to stack images
-def stack_images(images, direction):
+def stack_images(images, direction, num_columns=2):
     if direction == 'Horizontal':
         total_width = sum(img.width for img in images)
         max_height = max(img.height for img in images)
@@ -33,24 +32,17 @@ def stack_images(images, direction):
             y_offset += img.height
 
     elif direction == 'Both':
-        # Determine the number of columns
-        num_columns = 2  # Change this value if you want more columns
+        # Create a list to hold the rows
+        rows = []
 
-        # Calculate the number of rows
-        num_rows = (len(images) + num_columns - 1) // num_columns
-
-        # Create a list of lists to hold images in each row
-        rows = [[] for _ in range(num_rows)]
-
-        for i, img in enumerate(images):
-            row_idx = i // num_columns
-            rows[row_idx].append(img)
-
-        # Stack images in each row horizontally
-        horizontal_stacked_images = [stack_images(row, 'Horizontal') for row in rows]
+        # Group images into rows
+        for i in range(0, len(images), num_columns):
+            row_images = images[i:i + num_columns]
+            row_image = stack_images(row_images, 'Horizontal')
+            rows.append(row_image)
 
         # Stack all rows vertically
-        new_image = stack_images(horizontal_stacked_images, 'Vertical')
+        new_image = stack_images(rows, 'Vertical')
 
     return new_image
 
