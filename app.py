@@ -2,9 +2,9 @@ import streamlit as st
 import cv2
 import numpy as np
 from ultralytics import YOLO
-import zipfile
-import os
 from io import BytesIO
+import zipfile
+from PIL import Image
 
 @st.cache_resource
 def load_model():
@@ -17,74 +17,93 @@ model = load_model()
 # Streamlit app
 st.title("Object Detection and Image Merging")
 
-# Bulk upload images
-uploaded_files = st.file_uploader("Choose images...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+# Allow user to choose option for max border and half max space between
+use_max_border_space = st.checkbox("Apply max border and half max space between for all images", value=False)
+
+# Upload multiple images
+uploaded_files = st.file_uploader("Choose image files...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
 
 if uploaded_files:
-    # Read the first image to determine allowed ranges for border and space between
-    sample_img_bytes = np.asarray(bytearray(uploaded_files[0].read()), dtype=np.uint8)
-    sample_img = cv2.imdecode(sample_img_bytes, 1)
-    img_height, img_width = sample_img.shape[:2]
-
-    # Reset the file pointer to the beginning for re-reading
-    uploaded_files[0].seek(0)
-
-    # Display global sliders for max border and space between
-    max_allowed_border = min(img_height, img_width) // 2
-    st.write(f"Select the maximum border and space between for all images")
-    border = st.slider("Select border size", 0, max_allowed_border, 0)
-    space_between = st.slider("Select space between size", 0, max_allowed_border, 0)
-
-    processed_images = []
-
+    images = []
+    filenames = []
+    
     for uploaded_file in uploaded_files:
-        # Read each uploaded image
+        # Read the uploaded image
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
-        
-        st.image(img, channels="BGR", caption=f"Uploaded Image: {uploaded_file.name}")
+        images.append(img)
+        filenames.append(uploaded_file.name)
+    
+    # Prepare a BytesIO buffer for the zip file
+    zip_buffer = BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
+        # Process each image
+        for img, filename in zip(images, filenames):
+            st.image(img, channels="BGR", caption=f"Uploaded Image: {filename}")
 
-        # Perform object detection
-        result = model.predict(img)
-        result = result[0]
-        all_boxes = [box.xyxy[0].tolist() for box in result.boxes]
+            # Perform object detection
+            result = model.predict(img)
+            result = result[0]
 
-        # Compute the minimum bounding rectangle that encloses all the bounding boxes
-        x_min = round(min(box[0] for box in all_boxes))
-        y_min = round(min(box[1] for box in all_boxes))
-        x_max = round(max(box[2] for box in all_boxes))
-        y_max = round(max(box[3] for box in all_boxes))
-        combined_box = [x_min, y_min, x_max, y_max]
+            if len(result.boxes) > 0:
+                all_boxes = [box.xyxy[0].tolist() for box in result.boxes]
 
-        # Calculate borders and space between
-        y_min_border = max(y_min - border, 0)
-        y_max_border = y_max + border if y_max + border < img.shape[0] else img.shape[0]
-        x_min_border = max(x_min - border, 0)
-        x_max_border = x_max + border if x_max + border < img.shape[1] else img.shape[1]
-        x_min_bw = max(x_min - space_between, 0)
-        x_max_bw = x_max + space_between if x_max + space_between < img.shape[1] else img.shape[1]
+                for box in result.boxes:
+                    cords = box.xyxy[0].tolist()
+                    cords = [round(x) for x in cords]
+                    x1, y1, x2, y2 = cords
+                    cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Draw green rectangles
 
-        # Concatenate images side by side
-        combined_img = cv2.hconcat([
-            img[y_min_border:y_max_border, x_min_border:x_max_bw], 
-            img[y_min_border:y_max_border, x_min_bw:x_max_border]
-        ])
+                # Compute the minimum bounding rectangle that encloses all the bounding boxes
+                x_min = round(min(box[0] for box in all_boxes))
+                y_min = round(min(box[1] for box in all_boxes))
+                x_max = round(max(box[2] for box in all_boxes))
+                y_max = round(max(box[3] for box in all_boxes))
+                combined_box = [x_min, y_min, x_max, y_max]
 
-        # Display the combined image
-        st.image(combined_img, channels="BGR", caption=f"Combined Image for: {uploaded_file.name}")
+                # Calculate max border and max space between
+                max_border = min(y_min, img.shape[0] - y_max)
+                max_space_between = min(x_min, img.shape[1] - x_max)
+                border = max_border if use_max_border_space else st.slider(f"Select border size for {filename}", 0, max_border, 0)
+                space_between = max_space_between // 2 if use_max_border_space else st.slider(f"Select space between size for {filename}", 0, max_space_between, 0)
 
-        # Save processed image to list
-        processed_images.append((uploaded_file.name, combined_img))
+                # Calculate borders and space between
+                y_min_border = max(y_min - border, 0)
+                y_max_border = y_max + border if y_max + border < img.shape[0] else img.shape[0]
+                x_min_border = max(x_min - border, 0)
+                x_max_border = x_max + border if x_max + border < img.shape[1] else img.shape[1]
+                x_min_bw = max(x_min - space_between, 0)
+                x_max_bw = x_max + space_between if x_max + space_between < img.shape[1] else img.shape[1]
 
-    # Create a zip file with all processed images
-    if processed_images:
-        zip_buffer = BytesIO()
-        with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-            for img_name, img in processed_images:
-                img_bytes = cv2.imencode('.jpg', img)[1].tobytes()
-                zip_file.writestr(img_name, img_bytes)
+                # Concatenate images side by side with detected bounding boxes
+                combined_img = cv2.hconcat([
+                    img[y_min_border:y_max_border, x_min_border:x_max_bw], 
+                    img[y_min_border:y_max_border, x_min_bw:x_max_border]
+                ])
+            else:
+                # Concatenate images side by side without bounding boxes
+                combined_img = cv2.hconcat([img, img])
 
-        # Provide download link for the zip file
-        st.download_button(
-            label="Download all processed images as zip",
-           
+            # Convert combined image to RGB (OpenCV uses BGR by default)
+            combined_img_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
+
+            # Display the processed image with bounding boxes
+            st.image(combined_img_rgb, caption=f"Processed Image: {filename}", use_column_width=True)
+
+            # Save the image to a buffer
+            img_pil = Image.fromarray(combined_img_rgb)
+            img_buffer = BytesIO()
+            img_pil.save(img_buffer, format="JPEG")
+            img_buffer.seek(0)
+
+            # Write the buffer to the zip file
+            zip_file.writestr(filename, img_buffer.read())
+
+    # Provide a download link for the zip file
+    st.download_button(
+        label="Download all images as zip",
+        data=zip_buffer.getvalue(),
+        file_name="processed_images.zip",
+        mime="application/zip"
+    )
