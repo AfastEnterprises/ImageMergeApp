@@ -33,20 +33,24 @@ def stack_images(images, direction):
             y_offset += img.height
 
     elif direction == 'Both':
-        # First stack images horizontally
-        total_width = sum(img.width for img in images)
-        max_height = max(img.height for img in images)
-        horizontal_image = Image.new('RGB', (total_width, max_height))
+        # Determine the number of columns
+        num_columns = 2  # Change this value if you want more columns
 
-        x_offset = 0
-        for img in images:
-            horizontal_image.paste(img, (x_offset, 0))
-            x_offset += img.width
+        # Calculate the number of rows
+        num_rows = (len(images) + num_columns - 1) // num_columns
 
-        # Then stack the resulting horizontal image vertically
-        new_image = Image.new('RGB', (horizontal_image.width, 2 * horizontal_image.height))
-        new_image.paste(horizontal_image, (0, 0))
-        new_image.paste(horizontal_image, (0, horizontal_image.height))
+        # Create a list of lists to hold images in each row
+        rows = [[] for _ in range(num_rows)]
+
+        for i, img in enumerate(images):
+            row_idx = i // num_columns
+            rows[row_idx].append(img)
+
+        # Stack images in each row horizontally
+        horizontal_stacked_images = [stack_images(row, 'Horizontal') for row in rows]
+
+        # Stack all rows vertically
+        new_image = stack_images(horizontal_stacked_images, 'Vertical')
 
     return new_image
 
