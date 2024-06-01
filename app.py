@@ -1,147 +1,76 @@
 import streamlit as st
-import cv2
-import numpy as np
-from ultralytics import YOLO
-from io import BytesIO
+from PIL import Image, ImageOps
+import io
 import zipfile
-from PIL import Image
+import os
 
-@st.cache_resource
-def load_model():
-    model = YOLO("yolov8m.pt")
-    return model
+def process_images(images, stack_option, resize_option, border_size):
+    processed_images = []
 
-# Load the YOLO model
-model = load_model()
+    for image in images:
+        img = Image.open(image)
 
-# Streamlit app
-st.title("Object Detection and Image Merging")
+        # Resize Image
+        if resize_option:
+            img = img.resize(resize_option)
 
-# Allow user to choose option for max border and half max space between
-use_max_border_space = st.checkbox("Apply max border and half max space between for all images", value=False)
+        # Add Border
+        if border_size > 0:
+            img = ImageOps.expand(img, border=border_size, fill='black')
 
-# Global option to merge images normally without detection
-merge_without_detection = st.checkbox("Merge images without detection", value=False)
+        processed_images.append(img)
 
-# Option to stack images horizontally or vertically
-stack_direction = st.radio("Choose stacking direction", ("Horizontal", "Vertical"))
+    # Stack Images
+    if stack_option == "Horizontal":
+        combined_image = Image.new('RGB', (sum(img.width for img in processed_images), max(img.height for img in processed_images)))
+        x_offset = 0
+        for img in processed_images:
+            combined_image.paste(img, (x_offset,0))
+            x_offset += img.width
 
-# Option to resize images
-resize_option = st.selectbox("Resize images to:", ("Original", "1080p", "1440p"))
+    elif stack_option == "Vertical":
+        combined_image = Image.new('RGB', (max(img.width for img in processed_images), sum(img.height for img in processed_images)))
+        y_offset = 0
+        for img in processed_images:
+            combined_image.paste(img, (0,y_offset))
+            y_offset += img.height
 
-# Upload multiple images
-uploaded_files = st.file_uploader("Choose image files...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+    elif stack_option == "Both":
+        combined_image = Image.new('RGB', (2 * max(img.width for img in processed_images), 2 * max(img.height for img in processed_images)))
+        x_offset = 0
+        y_offset = 0
+        for idx, img in enumerate(processed_images):
+            combined_image.paste(img, (x_offset,y_offset))
+            x_offset += img.width
+            if (idx + 1) % 2 == 0:
+                x_offset = 0
+                y_offset += img.height
 
-def resize_and_pad(image, target_height):
-    original_height, original_width = image.shape[:2]
-    aspect_ratio = original_width / original_height
-    target_width = int(target_height * aspect_ratio)
-    resized_image = cv2.resize(image, (target_width, target_height))
+    return combined_image
 
-    if stack_direction == "Horizontal":
-        padded_image = cv2.copyMakeBorder(resized_image, 0, 0, 0, max(0, 1440 - target_width), cv2.BORDER_CONSTANT, value=(0, 0, 0))
+st.title("Bulk Image Processor")
+
+uploaded_files = st.file_uploader("Upload Images", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+
+stack_option = st.selectbox("Stack Images", ["Horizontal", "Vertical", "Both"])
+resize_option = st.slider("Resize to (width, height)", 100, 800, (400, 400))
+border_size = st.slider("Border Size", 0, 50, 0)
+
+if st.button("Process and Download"):
+    if uploaded_files:
+        images = [Image.open(image) for image in uploaded_files]
+        processed_image = process_images(images, stack_option, resize_option, border_size)
+
+        # Save the processed images to a zip file
+        zip_buffer = io.BytesIO()
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            img_buffer = io.BytesIO()
+            processed_image.save(img_buffer, format="PNG")
+            zip_file.writestr("processed_image.png", img_buffer.getvalue())
+
+        zip_buffer.seek(0)
+
+        st.download_button("Download ZIP", zip_buffer, "processed_images.zip", "application/zip")
+
     else:
-        padded_image = cv2.copyMakeBorder(resized_image, 0, max(0, 1440 - target_height), 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
-
-    return padded_image
-
-if uploaded_files:
-    images = []
-    filenames = []
-
-    for uploaded_file in uploaded_files:
-        # Read the uploaded image
-        file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-        img = cv2.imdecode(file_bytes, 1)
-        images.append(img)
-        filenames.append(uploaded_file.name)
-
-    # Prepare a BytesIO buffer for the zip file
-    zip_buffer = BytesIO()
-
-    with zipfile.ZipFile(zip_buffer, "w") as zip_file:
-        # Process each image
-        for img, filename in zip(images, filenames):
-            st.image(img, channels="BGR", caption=f"Uploaded Image: {filename}")
-
-            # Resize and pad the image if needed
-            if resize_option == "1080p":
-                img = resize_and_pad(img, 1080)
-            elif resize_option == "1440p":
-                img = resize_and_pad(img, 1440)
-
-            if merge_without_detection:
-                # Concatenate images side by side without detection
-                combined_img = cv2.hconcat([img, img]) if stack_direction == "Horizontal" else cv2.vconcat([img, img])
-            else:
-                # Perform object detection
-                result = model.predict(img)
-                result = result[0]
-
-                if len(result.boxes) > 0:
-                    all_boxes = [box.xyxy[0].tolist() for box in result.boxes]
-
-                    for box in result.boxes:
-                        cords = box.xyxy[0].tolist()
-                        cords = [round(x) for x in cords]
-                        x1, y1, x2, y2 = cords
-                        cv2.rectangle(img, (x1, y1), (x2, y2), (0, 255, 0), 2)  # Draw green rectangles
-
-                    # Compute the minimum bounding rectangle that encloses all the bounding boxes
-                    x_min = round(min(box[0] for box in all_boxes))
-                    y_min = round(min(box[1] for box in all_boxes))
-                    x_max = round(max(box[2] for box in all_boxes))
-                    y_max = round(max(box[3] for box in all_boxes))
-                    combined_box = [x_min, y_min, x_max, y_max]
-
-                    # Calculate max border and max space between
-                    max_border = min(y_min, img.shape[0] - y_max)
-                    max_space_between = min(x_min, img.shape[1] - x_max)
-                    border = max_border if use_max_border_space else st.slider(f"Select border size for {filename}", 0, max_border, 0)
-                    space_between = max_space_between // 2 if use_max_border_space else st.slider(f"Select space between size for {filename}", 0, max_space_between, 0)
-
-                    # Calculate borders and space between
-                    y_min_border = max(y_min - border, 0)
-                    y_max_border = y_max + border if y_max + border < img.shape[0] else img.shape[0]
-                    x_min_border = max(x_min - border, 0)
-                    x_max_border = x_max + border if x_max + border < img.shape[1] else img.shape[1]
-                    x_min_bw = max(x_min - space_between, 0)
-                    x_max_bw = x_max + space_between if x_max + space_between < img.shape[1] else img.shape[1]
-
-                    # Concatenate images side by side with detected bounding boxes
-                    if stack_direction == "Horizontal":
-                        combined_img = cv2.hconcat([
-                            img[y_min_border:y_max_border, x_min_border:x_max_bw], 
-                            img[y_min_border:y_max_border, x_min_bw:x_max_border]
-                        ])
-                    else:
-                        combined_img = cv2.vconcat([
-                            img[y_min_border:y_max_border, x_min_border:x_max_bw], 
-                            img[y_min_border:y_max_border, x_min_bw:x_max_border]
-                        ])
-                else:
-                    # Concatenate images side by side without bounding boxes if no objects are detected
-                    combined_img = cv2.hconcat([img, img]) if stack_direction == "Horizontal" else cv2.vconcat([img, img])
-
-            # Convert combined image to RGB (OpenCV uses BGR by default)
-            combined_img_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
-
-            # Display the processed image with bounding boxes
-            st.image(combined_img_rgb, caption=f"Processed Image: {filename}", use_column_width=True)
-
-            # Save the image to a buffer
-            img_pil = Image.fromarray(combined_img_rgb)
-            img_buffer = BytesIO()
-            img_pil.save(img_buffer, format="JPEG")
-            img_buffer.seek(0)
-
-            # Write the buffer to the zip file
-            zip_file.writestr(filename, img_buffer.read())
-
-    # Provide a download link for the zip file
-    st.download_button(
-        label="Download all images as zip",
-        data=zip_buffer.getvalue(),
-        file_name="processed_images.zip",
-        mime="application/zip"
-    )
+        st.warning("Please upload at least one image.")
