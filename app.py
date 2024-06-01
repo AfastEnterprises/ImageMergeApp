@@ -1,71 +1,83 @@
 import streamlit as st
-import cv2
-import numpy as np
-import io
+from PIL import Image, ImageOps
+import os
 import zipfile
+from io import BytesIO
 
-def process_images(images, stack_option, border_size):
-    processed_images = []
+# Function to add border to an image
+def add_border(image, border_size):
+    if border_size > 0:
+        return ImageOps.expand(image, border=border_size, fill='black')
+    return image
 
-    for image in images:
-        # Read image with OpenCV
-        image_bytes = np.asarray(bytearray(image.read()), dtype=np.uint8)
-        img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
+# Function to stack images
+def stack_images(images, direction, border_size):
+    images_with_border = [add_border(img, border_size) for img in images]
 
-        # Add Border
-        if border_size > 0:
-            img = cv2.copyMakeBorder(img, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+    if direction == 'Horizontal':
+        total_width = sum(img.width for img in images_with_border)
+        max_height = max(img.height for img in images_with_border)
+        new_image = Image.new('RGB', (total_width, max_height))
 
-        processed_images.append(img)
+        x_offset = 0
+        for img in images_with_border:
+            new_image.paste(img, (x_offset, 0))
+            x_offset += img.width
 
-    # Stack Images
-    if stack_option == "Horizontal":
-        combined_image = cv2.hconcat(processed_images)
-    elif stack_option == "Vertical":
-        combined_image = cv2.vconcat(processed_images)
-    elif stack_option == "Both":
-        if len(processed_images) == 4:
-            row1 = cv2.hconcat(processed_images[:2])
-            row2 = cv2.hconcat(processed_images[2:])
-            combined_image = cv2.vconcat([row1, row2])
-        else:
-            st.warning("Please upload exactly four images for the 'Both' stacking option.")
-            combined_image = None
+    elif direction == 'Vertical':
+        total_height = sum(img.height for img in images_with_border)
+        max_width = max(img.width for img in images_with_border)
+        new_image = Image.new('RGB', (max_width, total_height))
 
-    return combined_image
+        y_offset = 0
+        for img in images_with_border:
+            new_image.paste(img, (0, y_offset))
+            y_offset += img.height
 
+    elif direction == 'Both':
+        # Stack horizontally first
+        total_width = sum(img.width for img in images_with_border)
+        max_height = max(img.height for img in images_with_border)
+        horizontal_image = Image.new('RGB', (total_width, max_height))
+
+        x_offset = 0
+        for img in images_with_border:
+            horizontal_image.paste(img, (x_offset, 0))
+            x_offset += img.width
+
+        # Then stack the resulting image vertically
+        total_height = 2 * horizontal_image.height
+        final_image = Image.new('RGB', (horizontal_image.width, total_height))
+        final_image.paste(horizontal_image, (0, 0))
+        final_image.paste(horizontal_image, (0, horizontal_image.height))
+
+        return final_image
+
+    return new_image
+
+# Streamlit app
 st.title("Bulk Image Processor")
 
-uploaded_files = st.file_uploader("Upload Images", accept_multiple_files=True, type=['png', 'jpg', 'jpeg'])
+uploaded_files = st.file_uploader("Upload Images", type=["png", "jpg", "jpeg"], accept_multiple_files=True)
 
-stack_option = st.selectbox("Stack Images", ["Horizontal", "Vertical", "Both"])
-border_size = st.slider("Border Size", 0, 50, 0)
+if uploaded_files:
+    border_size = st.slider("Select border size", min_value=0, max_value=50, value=0)
+    direction = st.selectbox("Select stacking direction", ["Horizontal", "Vertical", "Both"])
 
-if st.button("Process and Download"):
-    if uploaded_files:
-        # Processing images
-        processed_image = process_images(uploaded_files, stack_option, border_size)
+    if st.button("Process Images"):
+        processed_images = []
+        for uploaded_file in uploaded_files:
+            image = Image.open(uploaded_file)
+            processed_image = stack_images([image], direction, border_size)
+            processed_images.append((processed_image, uploaded_file.name))
 
-        if processed_image is not None:
-            # Save the processed image to a zip file
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
-                for uploaded_file in uploaded_files:
-                    image_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
-                    img = cv2.imdecode(image_bytes, cv2.IMREAD_COLOR)
-                    if border_size > 0:
-                        img = cv2.copyMakeBorder(img, border_size, border_size, border_size, border_size, cv2.BORDER_CONSTANT, value=[0, 0, 0])
+        # Save processed images to a zip file
+        zip_buffer = BytesIO()
+        with zipfile.ZipFile(zip_buffer, "a", zipfile.ZIP_DEFLATED, False) as zip_file:
+            for processed_image, filename in processed_images:
+                img_buffer = BytesIO()
+                processed_image.save(img_buffer, format="PNG")
+                zip_file.writestr(filename, img_buffer.getvalue())
 
-                    # Encode image as PNG
-                    is_success, buffer = cv2.imencode(".png", img)
-                    img_bytes = io.BytesIO(buffer)
-
-                    # Write to zip with the original file name
-                    zip_file.writestr(uploaded_file.name, img_bytes.getvalue())
-
-            zip_buffer.seek(0)
-
-            st.download_button("Download ZIP", zip_buffer, "processed_images.zip", "application/zip")
-
-    else:
-        st.warning("Please upload at least one image.")
+        zip_buffer.seek(0)
+        st.download_button("Download Processed Images", zip_buffer, "processed_images.zip", "application/zip")
