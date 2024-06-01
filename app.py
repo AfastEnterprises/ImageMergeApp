@@ -23,31 +23,56 @@ use_max_border_space = st.checkbox("Apply max border and half max space between 
 # Global option to merge images normally without detection
 merge_without_detection = st.checkbox("Merge images without detection", value=False)
 
+# Option to stack images horizontally or vertically
+stack_direction = st.radio("Choose stacking direction", ("Horizontal", "Vertical"))
+
+# Option to resize images
+resize_option = st.selectbox("Resize images to:", ("Original", "1080p", "1440p"))
+
 # Upload multiple images
 uploaded_files = st.file_uploader("Choose image files...", type=["jpg", "jpeg", "png"], accept_multiple_files=True)
+
+def resize_and_pad(image, target_height):
+    original_height, original_width = image.shape[:2]
+    aspect_ratio = original_width / original_height
+    target_width = int(target_height * aspect_ratio)
+    resized_image = cv2.resize(image, (target_width, target_height))
+
+    if stack_direction == "Horizontal":
+        padded_image = cv2.copyMakeBorder(resized_image, 0, 0, 0, max(0, 1440 - target_width), cv2.BORDER_CONSTANT, value=(0, 0, 0))
+    else:
+        padded_image = cv2.copyMakeBorder(resized_image, 0, max(0, 1440 - target_height), 0, 0, cv2.BORDER_CONSTANT, value=(0, 0, 0))
+
+    return padded_image
 
 if uploaded_files:
     images = []
     filenames = []
-    
+
     for uploaded_file in uploaded_files:
         # Read the uploaded image
         file_bytes = np.asarray(bytearray(uploaded_file.read()), dtype=np.uint8)
         img = cv2.imdecode(file_bytes, 1)
         images.append(img)
         filenames.append(uploaded_file.name)
-    
+
     # Prepare a BytesIO buffer for the zip file
     zip_buffer = BytesIO()
-    
+
     with zipfile.ZipFile(zip_buffer, "w") as zip_file:
         # Process each image
         for img, filename in zip(images, filenames):
             st.image(img, channels="BGR", caption=f"Uploaded Image: {filename}")
 
+            # Resize and pad the image if needed
+            if resize_option == "1080p":
+                img = resize_and_pad(img, 1080)
+            elif resize_option == "1440p":
+                img = resize_and_pad(img, 1440)
+
             if merge_without_detection:
                 # Concatenate images side by side without detection
-                combined_img = cv2.hconcat([img, img])
+                combined_img = cv2.hconcat([img, img]) if stack_direction == "Horizontal" else cv2.vconcat([img, img])
             else:
                 # Perform object detection
                 result = model.predict(img)
@@ -84,13 +109,19 @@ if uploaded_files:
                     x_max_bw = x_max + space_between if x_max + space_between < img.shape[1] else img.shape[1]
 
                     # Concatenate images side by side with detected bounding boxes
-                    combined_img = cv2.hconcat([
-                        img[y_min_border:y_max_border, x_min_border:x_max_bw], 
-                        img[y_min_border:y_max_border, x_min_bw:x_max_border]
-                    ])
+                    if stack_direction == "Horizontal":
+                        combined_img = cv2.hconcat([
+                            img[y_min_border:y_max_border, x_min_border:x_max_bw], 
+                            img[y_min_border:y_max_border, x_min_bw:x_max_border]
+                        ])
+                    else:
+                        combined_img = cv2.vconcat([
+                            img[y_min_border:y_max_border, x_min_border:x_max_bw], 
+                            img[y_min_border:y_max_border, x_min_bw:x_max_border]
+                        ])
                 else:
                     # Concatenate images side by side without bounding boxes if no objects are detected
-                    combined_img = cv2.hconcat([img, img])
+                    combined_img = cv2.hconcat([img, img]) if stack_direction == "Horizontal" else cv2.vconcat([img, img])
 
             # Convert combined image to RGB (OpenCV uses BGR by default)
             combined_img_rgb = cv2.cvtColor(combined_img, cv2.COLOR_BGR2RGB)
