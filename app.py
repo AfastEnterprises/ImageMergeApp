@@ -9,7 +9,7 @@ import concurrent.futures
 
 # Function to load the password from Streamlit secrets
 def load_password():
-    return st.secrets["password"]["value"]
+    return st.secrets["password"]
 
 def stack_images(image, mode):
     if mode == 'Horizontal':
