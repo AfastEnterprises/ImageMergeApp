@@ -1,7 +1,6 @@
 import streamlit as st
-import cv2
+from PIL import Image, ImageOps
 import numpy as np
-from PIL import Image
 import os
 import tempfile
 import zipfile
@@ -13,24 +12,25 @@ def load_password():
 
 def stack_images(image, mode):
     if mode == 'Horizontal':
-        stacked_image = np.hstack([image, image])
+        stacked_image = Image.fromarray(np.hstack([image, image]))
     elif mode == 'Vertical':
-        stacked_image = np.vstack([image, image])
+        stacked_image = Image.fromarray(np.vstack([image, image]))
     elif mode == 'Both':
-        stacked_image = np.hstack([image, image])
-        stacked_image = np.vstack([stacked_image, stacked_image])
+        stacked_image = Image.fromarray(np.hstack([image, image]))
+        stacked_image = Image.fromarray(np.vstack([np.array(stacked_image), np.array(stacked_image)]))
     else:
         stacked_image = image
         
     return stacked_image
 
 def process_image(uploaded_file, mode, padding, output_dir):
-    image = np.array(Image.open(uploaded_file))
+    image = Image.open(uploaded_file)
+    image = np.array(image)
     processed_image = stack_images(image, mode)
     if padding > 0:
-        processed_image = cv2.copyMakeBorder(processed_image, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=(255, 255, 255))
+        processed_image = ImageOps.expand(processed_image, border=padding, fill='white')
     output_path = os.path.join(output_dir, uploaded_file.name)
-    cv2.imwrite(output_path, cv2.cvtColor(processed_image, cv2.COLOR_RGB2BGR))
+    processed_image.save(output_path)
     return uploaded_file.name, output_path
 
 def main():
@@ -63,24 +63,15 @@ def main():
         with concurrent.futures.ThreadPoolExecutor() as executor:
             futures = []
             for uploaded_file in uploaded_files:
-                futures.append(executor.submit(process_image, uploaded_file, mode, 0, output_dir))
+                futures.append(executor.submit(process_image, uploaded_file, mode, padding, output_dir))
             for future in concurrent.futures.as_completed(futures):
                 processed_files.append(future.result())
-
-        # Apply padding after stacking
-        processed_files_with_padding = []
-        for filename, filepath in processed_files:
-            image = cv2.imread(filepath)
-            padded_image = cv2.copyMakeBorder(image, padding, padding, padding, padding, cv2.BORDER_CONSTANT, value=(255, 255, 255))
-            padded_file_path = os.path.join(output_dir, filename)
-            cv2.imwrite(padded_file_path, padded_image)
-            processed_files_with_padding.append((filename, padded_file_path))
 
         st.success("Processing complete. Download your files below:")
 
         with tempfile.NamedTemporaryFile(delete=False) as tmp:
             with zipfile.ZipFile(tmp, 'w') as z:
-                for filename, filepath in processed_files_with_padding:
+                for filename, filepath in processed_files:
                     z.write(filepath, filename)
 
         with open(tmp.name, 'rb') as f:
